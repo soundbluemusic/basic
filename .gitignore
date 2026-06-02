@@ -12,6 +12,8 @@ pnpm-debug.log*
 .env.production
 # macOS
 .DS_Store
+# wrangler / cloudflare
+.wrangler/
 # playwright screenshots
 .playwright-mcp/
 *.png

@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "soundblue-basic",
+  "compatibility_date": "2026-06-01",
+  // 정적 전용 Worker: Astro 빌드 결과(./dist)를 그대로 서빙.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  // 커스텀 도메인 — 배포 시 wrangler가 붙임 (zone: soundbluemusic.com).
+  "routes": [{ "pattern": "basic.soundbluemusic.com", "custom_domain": true }]
+}
