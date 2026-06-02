@@ -1,0 +1,167 @@
+---
+import Base from '../layouts/Base.astro';
+
+// 홈: 큰 카드 3개. 이게 전부입니다. 복잡한 메뉴 없음.
+// ready:false 인 카드는 아직 누를 수 없게 '곧 나와요'로 표시 → 빈 링크로 인한 혼란 방지.
+const cards = [
+  { href: '/listen/piano', icon: 'speaker', title: '들어보기', sub: '소리를 들어봐요', ready: true },
+  { href: '#', icon: 'search', title: '알아보기', sub: '이름을 구경해요', ready: false },
+  { href: '#', icon: 'hand', title: '따라해보기', sub: '직접 해봐요', ready: false },
+];
+
+// 굵은 선 단색 SVG 픽토그램(이모지 대신). currentColor라 카드 색을 그대로 따라가요.
+const icons: Record<string, string> = {
+  speaker:
+    '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18h7l10-8v28l-10-8H7z"/><path d="M30 19a7 7 0 0 1 0 10"/><path d="M35 14a14 14 0 0 1 0 20"/></svg>',
+  search:
+    '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="21" cy="21" r="12"/><line x1="30" y1="30" x2="40" y2="40"/></svg>',
+  hand:
+    '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 24v-8M21 24V12M27 24V13M33 24v-5"/><path d="M15 23a4 4 0 0 0-7 3l3 9a14 14 0 0 0 13 9 14 14 0 0 0 14-14V19a3 3 0 0 0-6 0"/></svg>',
+};
+---
+
+<Base title="아주 쉬운 음악">
+  <main id="main">
+    <h1>아주 쉬운 음악</h1>
+    <p class="intro">소리와 음악을,<br />세상에서 제일 쉽게 배워요.</p>
+
+    <nav class="cards" aria-label="무엇을 해볼까요">
+      {
+        cards.map((c) =>
+          c.ready ? (
+            <a class="card" href={c.href}>
+              <span class="card__icon" set:html={icons[c.icon]} />
+              <span class="card__text">
+                <span class="card__title">{c.title}</span>
+                <span class="card__sub">{c.sub}</span>
+              </span>
+              <span class="card__go" aria-hidden="true">
+                ›
+              </span>
+            </a>
+          ) : (
+            <div class="card card--soon" role="group" aria-label={`${c.title}, 곧 나와요`}>
+              <span class="card__icon" set:html={icons[c.icon]} />
+              <span class="card__text">
+                <span class="card__title">{c.title}</span>
+                <span class="card__sub">{c.sub}</span>
+              </span>
+              <span class="card__badge">곧 나와요</span>
+            </div>
+          )
+        )
+      }
+    </nav>
+  </main>
+</Base>
+
+<style>
+  .intro {
+    font-size: 1.15rem;
+    color: var(--ink-soft);
+    margin-bottom: 36px;
+  }
+
+  .cards {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .card {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 26px 22px;
+    border: 3px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--paper);
+    color: var(--ink);
+    text-decoration: none;
+    box-shadow: 0 4px 0 rgba(22, 22, 22, 0.16);
+    transition:
+      transform 0.06s ease,
+      box-shadow 0.06s ease,
+      background 0.06s ease;
+  }
+
+  .card__icon {
+    flex: none;
+    display: inline-flex;
+    width: 2.7rem;
+    height: 2.7rem;
+    color: var(--accent);
+  }
+  .card__icon :global(svg) {
+    width: 100%;
+    height: 100%;
+  }
+
+  .card__text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+  }
+
+  .card__title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .card__sub {
+    font-size: 1rem;
+    color: var(--ink-soft);
+  }
+
+  .card__go {
+    font-size: 2.4rem;
+    line-height: 1;
+    color: var(--accent);
+    flex: none;
+  }
+
+  /* 누르는 순간: 살짝 눌리고 파랗게 — '눌렸다'는 확실한 신호 (아이콘도 흰색으로 자동 반전) */
+  .card:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 rgba(22, 22, 22, 0.16);
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .card:active .card__sub,
+  .card:active .card__go,
+  .card:active .card__icon {
+    color: var(--accent-ink);
+  }
+
+  /* 아직 준비 안 된 카드: 점선 + '곧 나와요' 배지. 글자는 충분히 읽히게 (옅게 하지 않음) */
+  .card--soon {
+    border-style: dashed;
+    border-color: #c4c8cf;
+    box-shadow: none;
+    color: var(--ink-soft);
+    cursor: default;
+  }
+  .card--soon .card__icon {
+    color: var(--ink-soft);
+  }
+  .card__badge {
+    flex: none;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+    background: var(--soft);
+    border-radius: 999px;
+    padding: 6px 14px;
+  }
+
+  /* 아주 좁은 화면(320px)에선 배지가 제목과 겹치지 않게 세로로 쌓음 */
+  @media (max-width: 360px) {
+    .card--soon {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+  }
+</style>

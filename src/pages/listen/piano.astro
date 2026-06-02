@@ -1,0 +1,280 @@
+---
+import Base from '../../layouts/Base.astro';
+
+// 흰 건반 한 옥타브 (도~높은도). 각 건반은 진짜 버튼이라 손가락·키보드·보조기기로 누를 수 있어요.
+// 어르신·초보 대상이라 반음(검은 건반)은 일부러 두지 않습니다.
+const whiteKeys = [
+  { note: 'C4', label: '도', freq: 261.63 },
+  { note: 'D4', label: '레', freq: 293.66 },
+  { note: 'E4', label: '미', freq: 329.63 },
+  { note: 'F4', label: '파', freq: 349.23 },
+  { note: 'G4', label: '솔', freq: 392.0 },
+  { note: 'A4', label: '라', freq: 440.0 },
+  { note: 'B4', label: '시', freq: 493.88 },
+  { note: 'C5', label: '도', freq: 523.25 },
+];
+---
+
+<Base title="피아노 소리 들어보기">
+  <main id="main">
+    <a class="back" href="/"><span aria-hidden="true">←</span> 처음으로</a>
+
+    <h1>피아노 소리 들어보기</h1>
+    <p class="lead">버튼을 누르면 피아노 소리가 나요.</p>
+    <p class="lead note">
+      소리가 안 나면, 폰 옆 볼륨 버튼을 올리고 무음(매너) 모드를 꺼 주세요.
+    </p>
+
+    <button id="play" class="big-button" type="button">
+      <span aria-hidden="true">▶</span> 소리 들어보기
+    </button>
+
+    <!-- 방금 난 음을 큰 글씨로 보여줘요 (소리 ↔ 화면 연결) -->
+    <p class="now" aria-live="polite"><span id="now">&nbsp;</span></p>
+
+    <p class="hint">
+      건반을 하나씩 눌러도 소리가 나요. <span aria-hidden="true">↓</span>
+    </p>
+
+    <div class="piano" role="group" aria-label="피아노 건반">
+      <div class="whites">
+        {
+          whiteKeys.map((k, i) => (
+            <button
+              class="key key--white"
+              type="button"
+              data-freq={k.freq}
+              data-label={k.label}
+              data-index={i}
+              aria-label={`${k.label} 건반`}
+            >
+              <span class="key__label">{k.label}</span>
+            </button>
+          ))
+        }
+      </div>
+    </div>
+  </main>
+</Base>
+
+<style>
+  .back {
+    display: inline-block;
+    font-size: 1rem;
+    font-weight: 700;
+    /* 떨리는 손도 쉽게 누르도록 탭 영역을 넓게 */
+    padding: 12px 14px;
+    margin-left: -14px;
+    margin-bottom: 8px;
+    text-decoration: none;
+  }
+  .back:active {
+    opacity: 0.6;
+  }
+
+  .lead {
+    font-size: 1.2rem;
+    margin-bottom: 14px;
+  }
+  .lead.note {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    margin-bottom: 22px;
+  }
+
+  /* ── 큰 버튼: 두껍고 눌리는 느낌 ── */
+  .big-button {
+    width: 100%;
+    padding: 30px;
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    box-shadow: 0 7px 0 var(--accent-deep);
+    transition:
+      transform 0.06s ease,
+      box-shadow 0.06s ease,
+      background 0.06s ease;
+  }
+  .big-button:active {
+    transform: translateY(7px);
+    box-shadow: 0 0 0 var(--accent-deep);
+    background: var(--accent-deep);
+  }
+
+  /* ── 방금 난 음 표시 ── */
+  .now {
+    height: 1.6em;
+    margin: 18px 0 6px;
+    text-align: center;
+  }
+  .now #now {
+    display: inline-block;
+    min-width: 1.6em;
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .now #now.pop {
+    animation: pop 0.3s ease;
+  }
+  @keyframes pop {
+    0% {
+      transform: scale(0.6);
+      opacity: 0.3;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .hint {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    text-align: center;
+    margin: 0 0 14px;
+  }
+
+  /* ── 피아노 (흰 건반만) ── */
+  .piano {
+    touch-action: manipulation; /* 두 번 탭 확대 방지 → 연주감 좋음 */
+    user-select: none;
+  }
+
+  .whites {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+  }
+
+  .key {
+    border: 3px solid var(--line);
+    transition:
+      transform 0.05s ease,
+      background 0.05s ease;
+  }
+
+  .key--white {
+    height: 230px;
+    background: var(--paper);
+    border-radius: 0 0 12px 12px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 18px;
+    box-shadow: 0 5px 0 rgba(22, 22, 22, 0.14);
+  }
+  .key__label {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  /* 눌리거나 연주될 때: 파랗게 빛나고 살짝 들어감 */
+  .key--white.is-on {
+    background: var(--accent);
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 rgba(22, 22, 22, 0.14);
+  }
+  .key--white.is-on .key__label {
+    color: var(--accent-ink);
+  }
+</style>
+
+<script>
+  // 브라우저가 직접 소리를 만들어요(Web Audio). 음원 파일이 필요 없어요.
+  // 구형 iOS(Safari)는 접두사 붙은 webkitAudioContext만 있어서 폴백을 둡니다.
+  const AC = (window.AudioContext ||
+    (window as any).webkitAudioContext) as typeof AudioContext;
+  let ctx: AudioContext | null = null;
+  function audio(): AudioContext {
+    if (!ctx) ctx = new AC();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  // resume()이 깨어나는 짧은 전이 중 첫 음이 잘리지 않도록 살짝 미리 예약.
+  const LOOKAHEAD = 0.05;
+
+  // 피아노 비슷한 '뎅' 소리: 기본음 + 옅은 배음 + 점점 작아지는 울림.
+  function pluck(freq: number, when: number, dur = 0.9) {
+    const ac = audio();
+    const partials = [
+      { mul: 1, gain: 0.6 },
+      { mul: 2, gain: 0.25 },
+      { mul: 3, gain: 0.12 },
+    ];
+    const out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, when);
+    out.gain.exponentialRampToValueAtTime(0.9, when + 0.01);
+    out.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    out.connect(ac.destination);
+    for (const p of partials) {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq * p.mul;
+      g.gain.value = p.gain;
+      osc.connect(g).connect(out);
+      osc.start(when);
+      osc.stop(when + dur);
+    }
+  }
+
+  // 화면 반응
+  const nowEl = document.getElementById('now');
+  function litKey(el: Element | null) {
+    if (!el) return;
+    el.classList.add('is-on');
+    setTimeout(() => el.classList.remove('is-on'), 260);
+  }
+  function showNow(text: string) {
+    if (!nowEl) return;
+    nowEl.textContent = text;
+    nowEl.classList.remove('pop');
+    void (nowEl as HTMLElement).offsetWidth; // 애니메이션 재시작
+    nowEl.classList.add('pop');
+  }
+
+  const whiteByIndex = [
+    ...document.querySelectorAll<HTMLButtonElement>('.key--white'),
+  ];
+
+  function play(freq: number, keyEl: Element | null, label?: string) {
+    pluck(freq, audio().currentTime + LOOKAHEAD);
+    litKey(keyEl);
+    if (label) showNow('지금 소리: ' + label);
+  }
+
+  // 큰 버튼: 도-미-솔-높은도 또르르 (해당 건반도 차례로 빛남)
+  const melody = [
+    { freq: 261.63, idx: 0 },
+    { freq: 329.63, idx: 2 },
+    { freq: 392.0, idx: 4 },
+    { freq: 523.25, idx: 7 },
+  ];
+  let playing = false; // 연주 중 재클릭 시 음 중첩 방지
+  document.getElementById('play')?.addEventListener('click', () => {
+    if (playing) return;
+    playing = true;
+    const ac = audio();
+    melody.forEach((m, i) => {
+      pluck(m.freq, ac.currentTime + LOOKAHEAD + i * 0.3);
+      setTimeout(() => litKey(whiteByIndex[m.idx]), i * 300);
+    });
+    // 낭독기엔 음표마다가 아니라 끝에 한 번만 알림
+    setTimeout(() => showNow('지금 소리: 도미솔도'), melody.length * 300);
+    setTimeout(() => {
+      playing = false;
+    }, melody.length * 300 + 900);
+  });
+
+  // 각 건반: click 하나로 마우스·터치·키보드(Enter/Space)·보조기기 모두 지원
+  document.querySelectorAll<HTMLButtonElement>('.key').forEach((key) => {
+    key.addEventListener('click', () => {
+      const freq = Number(key.dataset.freq);
+      if (freq) play(freq, key, key.dataset.label);
+    });
+  });
+</script>

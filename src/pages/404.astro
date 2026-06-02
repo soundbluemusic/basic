@@ -1,0 +1,36 @@
+---
+import Base from '../layouts/Base.astro';
+// 오타·옛 주소로 들어와도 영어 기본 화면에 갇히지 않게.
+// Astro 정적 빌드가 dist/404.html로 내보내고 Cloudflare Pages가 알아서 씁니다.
+---
+
+<Base title="여기엔 아무것도 없어요">
+  <main id="main">
+    <h1>여기엔 아무것도 없어요</h1>
+    <p>주소를 잘못 눌렀나 봐요.</p>
+    <a class="home-button" href="/">처음으로 돌아가기</a>
+  </main>
+</Base>
+
+<style>
+  /* piano.astro의 큰 버튼과 같은 모양 — 새 디자인 체계를 만들지 않습니다. */
+  .home-button {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    padding: 30px;
+    text-align: center;
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-radius: var(--radius);
+    text-decoration: none;
+    box-shadow: 0 7px 0 var(--accent-deep);
+  }
+  .home-button:active {
+    transform: translateY(7px);
+    box-shadow: 0 0 0 var(--accent-deep);
+    background: var(--accent-deep);
+  }
+</style>
