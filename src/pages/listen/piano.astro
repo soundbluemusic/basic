@@ -3,7 +3,7 @@ import Base from '../../layouts/Base.astro';
 
 // 흰 건반 한 옥타브 (도~높은도). 각 건반은 진짜 버튼이라 손가락·키보드·보조기기로 누를 수 있어요.
 // 어르신·초보 대상이라 반음(검은 건반)은 일부러 두지 않습니다.
-// midi: 실제 피아노 샘플과 매핑해 음높이를 맞추는 데 씁니다.
+// midi: 합성할 주파수를 계산하는 데 씁니다 (f = 440·2^((midi-69)/12)).
 const whiteKeys = [
   { label: '도', midi: 60 }, // C4
   { label: '레', midi: 62 }, // D4
@@ -184,79 +184,171 @@ const whiteKeys = [
 </style>
 
 <script>
-  // 진짜 피아노 소리 — Salamander Grand Piano(야마하 C5) 녹음 샘플을 재생합니다.
-  // 출처: Alexander Holm, CC-BY 3.0 (public/sounds/piano/, 자세한 건 CREDITS.md).
-  // 옥타브 안 5개 지점(C4·D#4·F#4·A4·C5)만 받아두고, 각 건반은 가장 가까운
-  // 샘플을 골라 최대 ±1반음만 미세 조정 → 음 깨짐 없이 피아노 음색 유지.
+  // ── 진짜 피아노는 결국 '주파수의 집합'이다 ──
+  // 음원 샘플 없이 Web Audio만으로 그랜드 피아노 현의 물리를 직접 합성합니다.
+  //  · 비조화성:  fₙ = n·f₀·√(1+B·n²)   (현이 뻣뻣해 배음이 정수배보다 살짝 위로)
+  //  · 배음별 차등 감쇠: 고배음이 먼저 죽어 시간이 갈수록 어두워짐 (피아노다움의 절반)
+  //  · 기본음 < 2배음:   오르간처럼 안 들리게
+  //  · 현 맥놀이(디튠) + 해머 타격 노이즈 + FM 어택색
+  // 가산 비조화(몸통) + FM 어택색 + 해머 노이즈 하이브리드. 구형 iOS Safari 호환.
   const AC = (window.AudioContext ||
     (window as any).webkitAudioContext) as typeof AudioContext;
+
   let ctx: AudioContext | null = null;
-  let master: GainNode | null = null;
+  let comp: DynamicsCompressorNode | null = null;
+  let NOISE: AudioBuffer | null = null;
+  const activeVoices: { bus: GainNode }[] = [];
+  const MAX_VOICES = 16;
+  const LOOKAHEAD = 0.005;
+
   function audio(): AudioContext {
     if (!ctx) {
       ctx = new AC();
-      master = ctx.createGain();
-      master.gain.value = 0.9; // 여러 음이 겹쳐도 찢어지지 않게
+      comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -18;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.25;
+      const master = ctx.createGain();
+      master.gain.value = 0.7;
+      comp.connect(master);
       master.connect(ctx.destination);
+      // 해머용 화이트노이즈 — 코드로 생성(음원 파일 아님), 한 번만.
+      NOISE = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate);
+      const d = NOISE.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
     if (ctx.state === 'suspended') ctx.resume();
     return ctx;
   }
 
-  // 재생을 살짝 미리 잡아 첫 음이 잘리지 않게.
-  const LOOKAHEAD = 0.05;
-
-  // 받아둔 샘플 지점 (이름 → MIDI 번호)
-  const SAMPLES = [
-    { note: 'C4', midi: 60 },
-    { note: 'Ds4', midi: 63 },
-    { note: 'Fs4', midi: 66 },
-    { note: 'A4', midi: 69 },
-    { note: 'C5', midi: 72 },
-  ];
-  const url = (n: string) => `/sounds/piano/${n}.mp3`;
-
-  function nearestSample(midi: number) {
-    let best = SAMPLES[0];
-    for (const s of SAMPLES) {
-      if (Math.abs(s.midi - midi) < Math.abs(best.midi - midi)) best = s;
-    }
-    return best;
+  // 배음별 최대 진폭 (n2가 최강 → 오르간 회피)
+  const PEAK = [0, 0.85, 1.0, 0.75, 0.55, 0.42, 0.32, 0.24, 0.18, 0.13, 0.1, 0.07, 0.05];
+  function inharmonicity(f0: number): number {
+    return f0 < 300 ? 0.00035 : f0 < 420 ? 0.0005 : 0.0007;
   }
 
-  // 파일은 페이지가 뜨자마자 미리 내려받기 시작 (재생은 첫 탭 이후).
-  const fetched: Record<string, Promise<ArrayBuffer>> = {};
-  for (const s of SAMPLES) {
-    fetched[s.note] = fetch(url(s.note)).then((r) => r.arrayBuffer());
-  }
-
-  // 구형 Safari는 콜백형 decodeAudioData만 지원 → 둘 다 받아줌.
-  function decode(c: AudioContext, arr: ArrayBuffer): Promise<AudioBuffer> {
-    return new Promise((res, rej) => {
-      const p = c.decodeAudioData(arr, res, rej);
-      if (p && typeof (p as any).then === 'function') (p as Promise<AudioBuffer>).then(res, rej);
-    });
-  }
-
-  // 샘플 1개당 디코딩은 한 번만 (slice로 원본 보존).
-  const decoding: Record<string, Promise<AudioBuffer>> = {};
-  function getBuffer(note: string): Promise<AudioBuffer> {
-    if (!decoding[note]) {
-      decoding[note] = fetched[note].then((arr) => decode(audio(), arr.slice(0)));
-    }
-    return decoding[note];
-  }
-
-  function startNote(buf: AudioBuffer, midi: number, sampleMidi: number, when: number) {
+  function reapOldest() {
     const c = audio();
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    src.playbackRate.value = Math.pow(2, (midi - sampleMidi) / 12);
-    src.connect(master as GainNode);
-    src.start(when);
+    while (activeVoices.length >= MAX_VOICES) {
+      const v = activeVoices.shift();
+      if (!v) break;
+      try {
+        v.bus.gain.setTargetAtTime(0.0001, c.currentTime, 0.05);
+        setTimeout(() => {
+          try {
+            v.bus.disconnect();
+          } catch {}
+        }, 200);
+      } catch {}
+    }
   }
 
-  // 화면 반응
+  // 한 음 합성.
+  function pianoNote(f0: number, velocity = 0.8, when?: number) {
+    const c = audio();
+    const t0 = when ?? c.currentTime + LOOKAHEAD;
+    reapOldest();
+
+    const hi = f0 > 400;
+    const N = hi ? 8 : 12;
+    const B = inharmonicity(f0);
+    const tau1 = hi ? 0.8 : 1.2; // 기본음 감쇠 시정수
+    const tail = hi ? 3 : 7; // 오실레이터 유지 시간(여운)
+    const atk = hi ? 0.001 : 0.003; // 1~3ms 빠른 어택
+    const nyq = 0.45 * c.sampleRate;
+
+    const bus = c.createGain();
+    bus.gain.value = velocity / 2; // 동시발음 헤드룸
+    bus.connect(comp as DynamicsCompressorNode);
+    const stopAt = t0 + tail;
+
+    // ── 가산 비조화 부분음 뱅크 ──
+    for (let n = 1; n <= N; n++) {
+      const fn = n * f0 * Math.sqrt(1 + B * n * n); // 비조화 stretch
+      if (fn >= nyq) break; // 나이퀴스트 가드
+      const a0 = (PEAK[n] || 0.04) * Math.exp(-n / (N * 0.8)) * 0.5;
+      const tauN = tau1 / Math.sqrt(n); // 고배음 빠른 감쇠 → 어두워짐
+      const detunes = n <= 3 ? [0.5 + 0.05 * n, -(0.5 + 0.05 * n)] : [0];
+      for (const dt of detunes) {
+        const osc = c.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(fn + dt, t0); // 절대 Hz 디튠 → 맥놀이
+        const g = c.createGain();
+        const a = a0 / detunes.length;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(a, t0 + atk);
+        if (n <= 2) {
+          // 2중 감쇠: 빠른 초기 강하 후 긴 꼬리
+          g.gain.setTargetAtTime(a * 0.45, t0 + atk, 0.15);
+          g.gain.setTargetAtTime(0.0001, t0 + 0.25, tauN);
+        } else {
+          g.gain.setTargetAtTime(0.0001, t0 + atk, tauN);
+        }
+        osc.connect(g);
+        g.connect(bus);
+        osc.start(t0);
+        osc.stop(stopAt);
+      }
+    }
+
+    // ── FM 어택 색 (인덱스 envelope으로 어택 수십ms에 가둬 DX7화 회피) ──
+    const car = c.createOscillator();
+    car.frequency.value = f0;
+    const mod = c.createOscillator();
+    mod.frequency.value = f0 * 2; // 정수비 1:2 (종소리 회피)
+    const idx = c.createGain();
+    const I = 1.5 + 1.5 * velocity;
+    idx.gain.setValueAtTime(0.0001, t0);
+    idx.gain.linearRampToValueAtTime(f0 * I, t0 + 0.002);
+    idx.gain.setTargetAtTime(0.0001, t0 + 0.002, 0.08);
+    mod.connect(idx);
+    idx.connect(car.frequency); // AudioParam FM
+    const cg = c.createGain();
+    cg.gain.setValueAtTime(0.0001, t0);
+    cg.gain.linearRampToValueAtTime(0.25 * velocity, t0 + atk);
+    cg.gain.setTargetAtTime(0.0001, t0 + atk, 0.18);
+    car.connect(cg);
+    cg.connect(bus);
+    car.start(t0);
+    mod.start(t0);
+    car.stop(t0 + 1.2);
+    mod.stop(t0 + 1.2);
+
+    // ── 해머 타격 트랜지언트 ──
+    const src = c.createBufferSource();
+    src.buffer = NOISE;
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = Math.min(4000, f0 * 2.2);
+    bp.Q.value = 0.9;
+    const hg = c.createGain();
+    hg.gain.setValueAtTime(0.12 * velocity, t0);
+    hg.gain.setTargetAtTime(0.0001, t0, 0.006); // ~30ms 소멸
+    src.connect(bp);
+    bp.connect(hg);
+    hg.connect(bus);
+    src.start(t0);
+    src.stop(t0 + 0.05);
+
+    // ── 자동 정리 ──
+    const voice = { bus };
+    activeVoices.push(voice);
+    setTimeout(
+      () => {
+        try {
+          bus.disconnect();
+        } catch {}
+        const k = activeVoices.indexOf(voice);
+        if (k >= 0) activeVoices.splice(k, 1);
+      },
+      (tail + 0.5) * 1000
+    );
+  }
+
+  const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+
+  // ── 화면 반응 ──
   const nowEl = document.getElementById('now');
   function litKey(el: Element | null) {
     if (!el) return;
@@ -275,16 +367,10 @@ const whiteKeys = [
     ...document.querySelectorAll<HTMLButtonElement>('.key--white'),
   ];
 
-  async function press(midi: number, keyEl: Element | null, label?: string) {
+  function press(midi: number, keyEl: Element | null, label?: string) {
     litKey(keyEl);
     if (label) showNow('지금 소리: ' + label);
-    try {
-      const s = nearestSample(midi);
-      const buf = await getBuffer(s.note);
-      startNote(buf, midi, s.midi, audio().currentTime + LOOKAHEAD);
-    } catch {
-      /* 네트워크 문제로 샘플을 못 받으면 조용히 넘어감 */
-    }
+    pianoNote(midiToFreq(midi), 0.8);
   }
 
   // 큰 버튼: 도-미-솔-높은도 또르르 (해당 건반도 차례로 빛남)
@@ -294,27 +380,24 @@ const whiteKeys = [
     { midi: 67, idx: 4 },
     { midi: 72, idx: 7 },
   ];
-  const STEP = 0.45; // 음 간격(초) — 피아노 여운에 맞춰 넉넉히
-  let playing = false; // 연주 중 재클릭 시 음 중첩 방지
-  document.getElementById('play')?.addEventListener('click', async () => {
+  const STEP = 0.45; // 음 간격(초)
+  let playing = false; // 연주 중 재클릭 시 중첩 방지
+  document.getElementById('play')?.addEventListener('click', () => {
     if (playing) return;
     playing = true;
-    try {
-      const items = melody.map((m) => ({ ...m, s: nearestSample(m.midi) }));
-      const bufs = await Promise.all(items.map((it) => getBuffer(it.s.note)));
-      const t0 = audio().currentTime + LOOKAHEAD;
-      items.forEach((it, i) => {
-        startNote(bufs[i], it.midi, it.s.midi, t0 + i * STEP);
-        setTimeout(() => litKey(whiteByIndex[it.idx]), i * STEP * 1000);
-      });
-      // 낭독기엔 음표마다가 아니라 끝에 한 번만 알림
-      setTimeout(() => showNow('지금 소리: 도미솔도'), items.length * STEP * 1000);
-      setTimeout(() => {
+    const c = audio();
+    const t0 = c.currentTime + LOOKAHEAD;
+    melody.forEach((m, i) => {
+      pianoNote(midiToFreq(m.midi), 0.85, t0 + i * STEP);
+      setTimeout(() => litKey(whiteByIndex[m.idx]), i * STEP * 1000);
+    });
+    setTimeout(() => showNow('지금 소리: 도미솔도'), melody.length * STEP * 1000);
+    setTimeout(
+      () => {
         playing = false;
-      }, items.length * STEP * 1000 + 1500);
-    } catch {
-      playing = false;
-    }
+      },
+      melody.length * STEP * 1000 + 1500
+    );
   });
 
   // 각 건반: click 하나로 마우스·터치·키보드(Enter/Space)·보조기기 모두 지원
