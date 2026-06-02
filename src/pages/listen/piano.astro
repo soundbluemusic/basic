@@ -3,15 +3,16 @@ import Base from '../../layouts/Base.astro';
 
 // 흰 건반 한 옥타브 (도~높은도). 각 건반은 진짜 버튼이라 손가락·키보드·보조기기로 누를 수 있어요.
 // 어르신·초보 대상이라 반음(검은 건반)은 일부러 두지 않습니다.
+// midi: 실제 피아노 샘플과 매핑해 음높이를 맞추는 데 씁니다.
 const whiteKeys = [
-  { note: 'C4', label: '도', freq: 261.63 },
-  { note: 'D4', label: '레', freq: 293.66 },
-  { note: 'E4', label: '미', freq: 329.63 },
-  { note: 'F4', label: '파', freq: 349.23 },
-  { note: 'G4', label: '솔', freq: 392.0 },
-  { note: 'A4', label: '라', freq: 440.0 },
-  { note: 'B4', label: '시', freq: 493.88 },
-  { note: 'C5', label: '도', freq: 523.25 },
+  { label: '도', midi: 60 }, // C4
+  { label: '레', midi: 62 }, // D4
+  { label: '미', midi: 64 }, // E4
+  { label: '파', midi: 65 }, // F4
+  { label: '솔', midi: 67 }, // G4
+  { label: '라', midi: 69 }, // A4
+  { label: '시', midi: 71 }, // B4
+  { label: '도', midi: 72 }, // C5
 ];
 ---
 
@@ -43,7 +44,7 @@ const whiteKeys = [
             <button
               class="key key--white"
               type="button"
-              data-freq={k.freq}
+              data-midi={k.midi}
               data-label={k.label}
               data-index={i}
               aria-label={`${k.label} 건반`}
@@ -183,43 +184,76 @@ const whiteKeys = [
 </style>
 
 <script>
-  // 브라우저가 직접 소리를 만들어요(Web Audio). 음원 파일이 필요 없어요.
-  // 구형 iOS(Safari)는 접두사 붙은 webkitAudioContext만 있어서 폴백을 둡니다.
+  // 진짜 피아노 소리 — Salamander Grand Piano(야마하 C5) 녹음 샘플을 재생합니다.
+  // 출처: Alexander Holm, CC-BY 3.0 (public/sounds/piano/, 자세한 건 CREDITS.md).
+  // 옥타브 안 5개 지점(C4·D#4·F#4·A4·C5)만 받아두고, 각 건반은 가장 가까운
+  // 샘플을 골라 최대 ±1반음만 미세 조정 → 음 깨짐 없이 피아노 음색 유지.
   const AC = (window.AudioContext ||
     (window as any).webkitAudioContext) as typeof AudioContext;
   let ctx: AudioContext | null = null;
+  let master: GainNode | null = null;
   function audio(): AudioContext {
-    if (!ctx) ctx = new AC();
+    if (!ctx) {
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.9; // 여러 음이 겹쳐도 찢어지지 않게
+      master.connect(ctx.destination);
+    }
     if (ctx.state === 'suspended') ctx.resume();
     return ctx;
   }
 
-  // resume()이 깨어나는 짧은 전이 중 첫 음이 잘리지 않도록 살짝 미리 예약.
+  // 재생을 살짝 미리 잡아 첫 음이 잘리지 않게.
   const LOOKAHEAD = 0.05;
 
-  // 피아노 비슷한 '뎅' 소리: 기본음 + 옅은 배음 + 점점 작아지는 울림.
-  function pluck(freq: number, when: number, dur = 0.9) {
-    const ac = audio();
-    const partials = [
-      { mul: 1, gain: 0.6 },
-      { mul: 2, gain: 0.25 },
-      { mul: 3, gain: 0.12 },
-    ];
-    const out = ac.createGain();
-    out.gain.setValueAtTime(0.0001, when);
-    out.gain.exponentialRampToValueAtTime(0.9, when + 0.01);
-    out.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-    out.connect(ac.destination);
-    for (const p of partials) {
-      const osc = ac.createOscillator();
-      const g = ac.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = freq * p.mul;
-      g.gain.value = p.gain;
-      osc.connect(g).connect(out);
-      osc.start(when);
-      osc.stop(when + dur);
+  // 받아둔 샘플 지점 (이름 → MIDI 번호)
+  const SAMPLES = [
+    { note: 'C4', midi: 60 },
+    { note: 'Ds4', midi: 63 },
+    { note: 'Fs4', midi: 66 },
+    { note: 'A4', midi: 69 },
+    { note: 'C5', midi: 72 },
+  ];
+  const url = (n: string) => `/sounds/piano/${n}.mp3`;
+
+  function nearestSample(midi: number) {
+    let best = SAMPLES[0];
+    for (const s of SAMPLES) {
+      if (Math.abs(s.midi - midi) < Math.abs(best.midi - midi)) best = s;
     }
+    return best;
+  }
+
+  // 파일은 페이지가 뜨자마자 미리 내려받기 시작 (재생은 첫 탭 이후).
+  const fetched: Record<string, Promise<ArrayBuffer>> = {};
+  for (const s of SAMPLES) {
+    fetched[s.note] = fetch(url(s.note)).then((r) => r.arrayBuffer());
+  }
+
+  // 구형 Safari는 콜백형 decodeAudioData만 지원 → 둘 다 받아줌.
+  function decode(c: AudioContext, arr: ArrayBuffer): Promise<AudioBuffer> {
+    return new Promise((res, rej) => {
+      const p = c.decodeAudioData(arr, res, rej);
+      if (p && typeof (p as any).then === 'function') (p as Promise<AudioBuffer>).then(res, rej);
+    });
+  }
+
+  // 샘플 1개당 디코딩은 한 번만 (slice로 원본 보존).
+  const decoding: Record<string, Promise<AudioBuffer>> = {};
+  function getBuffer(note: string): Promise<AudioBuffer> {
+    if (!decoding[note]) {
+      decoding[note] = fetched[note].then((arr) => decode(audio(), arr.slice(0)));
+    }
+    return decoding[note];
+  }
+
+  function startNote(buf: AudioBuffer, midi: number, sampleMidi: number, when: number) {
+    const c = audio();
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = Math.pow(2, (midi - sampleMidi) / 12);
+    src.connect(master as GainNode);
+    src.start(when);
   }
 
   // 화면 반응
@@ -241,40 +275,53 @@ const whiteKeys = [
     ...document.querySelectorAll<HTMLButtonElement>('.key--white'),
   ];
 
-  function play(freq: number, keyEl: Element | null, label?: string) {
-    pluck(freq, audio().currentTime + LOOKAHEAD);
+  async function press(midi: number, keyEl: Element | null, label?: string) {
     litKey(keyEl);
     if (label) showNow('지금 소리: ' + label);
+    try {
+      const s = nearestSample(midi);
+      const buf = await getBuffer(s.note);
+      startNote(buf, midi, s.midi, audio().currentTime + LOOKAHEAD);
+    } catch {
+      /* 네트워크 문제로 샘플을 못 받으면 조용히 넘어감 */
+    }
   }
 
   // 큰 버튼: 도-미-솔-높은도 또르르 (해당 건반도 차례로 빛남)
   const melody = [
-    { freq: 261.63, idx: 0 },
-    { freq: 329.63, idx: 2 },
-    { freq: 392.0, idx: 4 },
-    { freq: 523.25, idx: 7 },
+    { midi: 60, idx: 0 },
+    { midi: 64, idx: 2 },
+    { midi: 67, idx: 4 },
+    { midi: 72, idx: 7 },
   ];
+  const STEP = 0.45; // 음 간격(초) — 피아노 여운에 맞춰 넉넉히
   let playing = false; // 연주 중 재클릭 시 음 중첩 방지
-  document.getElementById('play')?.addEventListener('click', () => {
+  document.getElementById('play')?.addEventListener('click', async () => {
     if (playing) return;
     playing = true;
-    const ac = audio();
-    melody.forEach((m, i) => {
-      pluck(m.freq, ac.currentTime + LOOKAHEAD + i * 0.3);
-      setTimeout(() => litKey(whiteByIndex[m.idx]), i * 300);
-    });
-    // 낭독기엔 음표마다가 아니라 끝에 한 번만 알림
-    setTimeout(() => showNow('지금 소리: 도미솔도'), melody.length * 300);
-    setTimeout(() => {
+    try {
+      const items = melody.map((m) => ({ ...m, s: nearestSample(m.midi) }));
+      const bufs = await Promise.all(items.map((it) => getBuffer(it.s.note)));
+      const t0 = audio().currentTime + LOOKAHEAD;
+      items.forEach((it, i) => {
+        startNote(bufs[i], it.midi, it.s.midi, t0 + i * STEP);
+        setTimeout(() => litKey(whiteByIndex[it.idx]), i * STEP * 1000);
+      });
+      // 낭독기엔 음표마다가 아니라 끝에 한 번만 알림
+      setTimeout(() => showNow('지금 소리: 도미솔도'), items.length * STEP * 1000);
+      setTimeout(() => {
+        playing = false;
+      }, items.length * STEP * 1000 + 1500);
+    } catch {
       playing = false;
-    }, melody.length * 300 + 900);
+    }
   });
 
   // 각 건반: click 하나로 마우스·터치·키보드(Enter/Space)·보조기기 모두 지원
   document.querySelectorAll<HTMLButtonElement>('.key').forEach((key) => {
     key.addEventListener('click', () => {
-      const freq = Number(key.dataset.freq);
-      if (freq) play(freq, key, key.dataset.label);
+      const midi = Number(key.dataset.midi);
+      if (!Number.isNaN(midi)) press(midi, key, key.dataset.label);
     });
   });
 </script>
