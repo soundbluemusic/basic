@@ -41,9 +41,9 @@ class Voice {
     const B = inharmonicity(f0);
     const nyq = 0.45 * SR;
     const x0 = 1 / 8; // 타현 위치(현 길이의 1/8) → 8배수 배음 억제
-    // 배음 롤오프(dB/100Hz): 진짜 그랜드 녹음(Salamander)에 맞춰 보정 — FBS의 2dB보다
-    // 훨씬 완만해야 실제처럼 2~7배음이 강하게 살아 밝고 풍부함. 속도가 셀수록 더 완만.
-    const rolloff = Math.min(2.2, Math.max(0.45, 0.95 + (0.6 - v) * 1.1));
+    // 배음 롤오프(dB/100Hz): 야마하풍 밝은 그랜드(Salamander) 타깃 — 2~7배음이 강하게
+    // 살도록 매우 완만. 속도가 셀수록 더 완만(밝음).
+    const rolloff = Math.min(2.0, Math.max(0.3, 0.6 + (0.6 - v) * 0.9));
     // 유니즌 3현 미세 디튠(≈±0.4cent) → 맥놀이 (정량 측정 미확정, 추정값)
     const detunes = [-0.00025, 0.00003, 0.00025];
 
@@ -176,14 +176,15 @@ class PianoProcessor extends AudioWorkletProcessor {
     this.MAX = 16;
     const init = options && options.processorOptions;
     this.testLinear = !!(init && init.testLinear);
-    this.voiceGain = init && init.voiceGain != null ? init.voiceGain : 0.0043;
+    this.voiceGain = init && init.voiceGain != null ? init.voiceGain : 0.0032;
     // 사운드보드 복사(radiation) 근사: 저음(기본음) 약화 + 중역(노래하는 0.5~3kHz) 강조
     // → 진짜 그랜드처럼 2~7배음이 살아 밝고 풍부해짐. 거친 초고역은 약화.
     this.sb = [
-      makeHighPass(150, 0.7),
-      makeBiquadPeak(1300, 0.7, 6),
-      makeBiquadPeak(2800, 0.9, 4),
-      makeHighShelf(7000, -4),
+      makeHighPass(240, 0.7), // 기본음 약화 → n2 우세(야마하 특성)
+      makeBiquadPeak(850, 0.8, 5), // 노래하는 중역(n2~n4)
+      makeBiquadPeak(1800, 0.9, 5), // 화사한 상위 배음(n5~n7)
+      makeBiquadPeak(3200, 1.0, 3),
+      makeHighShelf(8000, -3),
     ];
     if (init && init.midi != null) {
       this.voices.push(new Voice(init.midi, init.vel == null ? 0.8 : init.vel));
