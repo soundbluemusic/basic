@@ -41,9 +41,15 @@ for (let midi = 21; midi <= 108; midi++) {
     <p class="now" aria-live="polite"><span id="now">&nbsp;</span></p>
 
     <p class="hint">
-      진짜 피아노처럼 건반 88개예요. 좌우로 밀어서 쳐 보세요.
-      <span aria-hidden="true">↔</span>
+      진짜 피아노처럼 건반 88개예요. 눌러서 치고, 끌어서 옮기고, 손가락 두 개로 키워요.
     </p>
+
+    <div class="kb-bar" role="group" aria-label="건반 조절">
+      <button class="kb-btn" id="zoomOut" type="button" aria-label="건반 작게">➖</button>
+      <button class="kb-btn" id="zoomIn" type="button" aria-label="건반 크게">➕</button>
+      <button class="kb-btn" id="recenter" type="button">가운데</button>
+      <button class="kb-btn" id="lock" type="button" aria-pressed="false">🔓 자유</button>
+    </div>
 
     <div class="piano-scroll" id="pianoScroll">
       <div class="keyboard" role="group" aria-label="피아노 건반 88개">
@@ -169,7 +175,41 @@ for (let midi = 21; midi <= 108; midi++) {
     /* 화면 가장자리까지 꽉 차게(좌우 패딩 상쇄) */
     margin: 0 calc(-1 * clamp(18px, 5vw, 28px));
     padding: 4px clamp(18px, 5vw, 28px) 14px;
-    touch-action: pan-x; /* 가로 스크롤만, 두 번 탭 확대 방지 */
+    touch-action: none; /* 제스처(탭=연주, 드래그=이동, 핀치=확대)를 직접 처리 */
+  }
+
+  /* ── 건반 조절 바 ── */
+  .kb-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .kb-btn {
+    min-width: 52px;
+    height: 48px;
+    padding: 0 12px;
+    font-size: 1rem;
+    font-weight: 800;
+    white-space: nowrap;
+    color: var(--ink);
+    background: var(--soft);
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .kb-btn:active {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .kb-btn[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  #lock {
+    margin-left: auto;
   }
   .keyboard {
     position: relative;
@@ -418,19 +458,131 @@ for (let midi = 21; midi <= 108; midi++) {
     );
   });
 
-  // 각 건반: click 하나로 마우스·터치·키보드(Enter/Space)·보조기기 모두 지원
+  // ── 건반 UX: 확대/축소(핀치·버튼·휠) · 이동(드래그·휠) · 탭=연주 · 고정(잠금) ──
+  const scroller = document.getElementById('pianoScroll') as HTMLElement;
+  let wkw = 40; // 흰 건반 폭(px)
+  const MINW = 24,
+    MAXW = 88;
+  function applyWkw() {
+    scroller.style.setProperty('--wkw', wkw + 'px');
+    scroller.style.setProperty('--bkw', (wkw * 0.62).toFixed(2) + 'px');
+  }
+  // 기준점(화면상 X)을 고정한 채 확대/축소
+  function setZoom(newW: number, anchorClientX?: number) {
+    newW = Math.max(MINW, Math.min(MAXW, newW));
+    const rect = scroller.getBoundingClientRect();
+    const ax = anchorClientX == null ? rect.width / 2 : anchorClientX - rect.left;
+    const contentX = scroller.scrollLeft + ax;
+    const ratio = newW / wkw;
+    wkw = newW;
+    applyWkw();
+    scroller.scrollLeft = contentX * ratio - ax;
+  }
+  function recenter(midi = 60) {
+    const el = keyByMidi.get(midi);
+    if (el)
+      scroller.scrollLeft =
+        el.offsetLeft - scroller.clientWidth / 2 + el.offsetWidth / 2;
+  }
+
+  let locked = false;
+  const lockBtn = document.getElementById('lock') as HTMLButtonElement;
+  lockBtn.addEventListener('click', () => {
+    locked = !locked;
+    lockBtn.setAttribute('aria-pressed', String(locked));
+    lockBtn.textContent = locked ? '🔒 고정' : '🔓 자유';
+  });
+  document
+    .getElementById('zoomIn')!
+    .addEventListener('click', () => setZoom(wkw * 1.25));
+  document
+    .getElementById('zoomOut')!
+    .addEventListener('click', () => setZoom(wkw / 1.25));
+  document
+    .getElementById('recenter')!
+    .addEventListener('click', () => recenter(60));
+
+  // 포인터 제스처(마우스·터치 공통): 1손가락=탭연주/드래그이동, 2손가락=핀치확대
+  const pts = new Map<number, { x: number; y: number }>();
+  let drag: { x: number; scroll: number; key: Element | null; moved: boolean } | null =
+    null;
+  let pinch: { dist: number; w: number; cx: number } | null = null;
+  const arr = () => [...pts.values()];
+  const dist2 = () => {
+    const a = arr();
+    return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+  };
+  const mid2 = () => {
+    const a = arr();
+    return (a[0].x + a[1].x) / 2;
+  };
+
+  scroller.addEventListener('pointerdown', (e) => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) {
+      pinch = { dist: dist2(), w: wkw, cx: mid2() };
+      drag = null;
+      return;
+    }
+    drag = {
+      x: e.clientX,
+      scroll: scroller.scrollLeft,
+      key: (e.target as Element).closest('.key'),
+      moved: false,
+    };
+    try {
+      scroller.setPointerCapture(e.pointerId);
+    } catch {}
+  });
+  scroller.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pts.size >= 2) {
+      const d = dist2();
+      if (pinch.dist > 0) setZoom(pinch.w * (d / pinch.dist), pinch.cx);
+      return;
+    }
+    if (drag) {
+      const dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) > 8) drag.moved = true;
+      if (drag.moved && !locked) scroller.scrollLeft = drag.scroll - dx;
+    }
+  });
+  function endPointer(e: PointerEvent) {
+    if (drag && pts.size === 1 && !drag.moved && drag.key) {
+      const midi = Number((drag.key as HTMLElement).dataset.midi);
+      if (!Number.isNaN(midi)) press(midi, drag.key);
+    }
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    if (pts.size === 0) drag = null;
+  }
+  scroller.addEventListener('pointerup', endPointer);
+  scroller.addEventListener('pointercancel', endPointer);
+
+  // 데스크탑 휠: 가로 스크롤 / Ctrl(⌘)+휠 = 확대축소
+  scroller.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey)
+        setZoom(wkw * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX);
+      else scroller.scrollLeft += e.deltaX || e.deltaY;
+    },
+    { passive: false }
+  );
+
+  // 키보드 접근성: 포커스된 건반에서 Enter/Space로 연주
   document.querySelectorAll<HTMLButtonElement>('.key').forEach((key) => {
-    key.addEventListener('click', () => {
-      const midi = Number(key.dataset.midi);
-      if (!Number.isNaN(midi)) press(midi, key);
+    key.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const midi = Number(key.dataset.midi);
+        if (!Number.isNaN(midi)) press(midi, key);
+      }
     });
   });
 
-  // 처음에 가운데 '도'(C4)가 보이도록 스크롤
-  const scroller = document.getElementById('pianoScroll');
-  const c4 = keyByMidi.get(60);
-  if (scroller && c4) {
-    scroller.scrollLeft =
-      c4.offsetLeft - scroller.clientWidth / 2 + c4.offsetWidth / 2;
-  }
+  applyWkw();
+  recenter(60);
 </script>
