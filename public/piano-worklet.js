@@ -27,9 +27,13 @@ function midiToFreq(m) {
   return 440 * Math.pow(2, (m - 69) / 12);
 }
 
-// 측정 비조화 계수 B(f₀): treble bridge 점근선(A3≈2e-4, A4≈7e-4)에 맞춘 멱법칙.
+// 비조화 계수 B(f₀): U자 곡선. 중역 최소, 저음·고음으로 상승.
+//  · treble bridge 점근선(A3≈2e-4, A4≈7e-4) 멱법칙
+//  · bass: 권선현 강성으로 저음에서 비조화 상승(FBS 실측 경향)
 function inharmonicity(f0) {
-  return 2.0e-4 * Math.pow(f0 / 220, 1.81);
+  const treble = 2.0e-4 * Math.pow(f0 / 220, 1.81);
+  const bass = 6.0e-5 * Math.pow(180 / Math.max(f0, 28), 1.6);
+  return Math.max(treble, bass);
 }
 
 class Voice {
@@ -40,30 +44,68 @@ class Voice {
 
     const B = inharmonicity(f0);
     const nyq = 0.45 * SR;
-    const x0 = 1 / 8; // 타현 위치(현 길이의 1/8) → 8배수 배음 억제
+    // 타현 위치(현 길이의 1/8) → 8배수 배음 억제. 매 타건 미세 랜덤(안티-머신건).
+    const x0 = 1 / 8 + 0.005 * (Math.random() * 2 - 1);
     // 배음 롤오프(dB/100Hz): 사용자 실제 피아노의 공정 스펙트럼(중역 기준)에 맞춤.
     // 고역 brilliance가 생각보다 풍부해 과한 어둠을 거두고 중간값으로.
     const rolloff = Math.min(2.5, Math.max(0.4, 1.0 + (0.6 - v) * 0.9));
-    // 유니즌 3현 미세 디튠(≈±0.4cent) → 맥놀이 (정량 측정 미확정, 추정값)
-    const detunes = [-0.00025, 0.00003, 0.00025];
+    // 레지스터별 현 수: 저음 권선현 1~2개, 중·고음 3개 (실제 피아노 구조)
+    const numStrings = f0 < 120 ? 1 : f0 < 250 ? 2 : 3;
+    const baseDet =
+      numStrings === 3
+        ? [-0.00025, 0.00003, 0.00025]
+        : numStrings === 2
+          ? [-0.0003, 0.0003]
+          : [0];
+    // 2단 감쇠(prompt/aftersound): 현마다 감쇠율을 살짝 달리해 빠른+느린 꼬리 창발
+    const decayMul =
+      numStrings === 3 ? [1.18, 1.0, 0.86] : numStrings === 2 ? [1.12, 0.9] : [1.0];
+    // 안티-머신건: 매 타건 미세 랜덤(디튠·음량) → 반복해도 똑같지 않게
+    const jit = () => Math.random() * 2 - 1;
+    const detunes = baseDet.map((d) => d + 0.0002 * jit());
+    const ampJit = 1 + 0.08 * jit();
 
     const a1 = [],
       a2 = [],
       init = [];
-    for (const det of detunes) {
-      const fs = f0 * (1 + det);
+    const firstPartials = []; // 저음 phantom 계산용(첫 현의 낮은 배음들)
+    for (let si = 0; si < detunes.length; si++) {
+      const fs = f0 * (1 + detunes[si]);
+      const dmul = decayMul[si];
       for (let n = 1; n <= 48; n++) {
         const fn = n * fs * Math.sqrt(1 + B * n * n); // 비조화 모드 주파수
         if (fn >= nyq) break;
         const env = Math.pow(10, (-rolloff * (fn - f0)) / 2000); // -rolloff dB/100Hz
         if (env < 5e-4 && n > 6) break; // 측정 포락선상 들리지 않는 고배음 컷
         const w = (2 * Math.PI * fn) / SR;
-        const sigma = 0.13 + 0.00212 * fn; // 측정 기반 감쇠율(고배음일수록 큼)
+        const sigma = (0.13 + 0.00212 * fn) * dmul; // 주파수 의존 + 현별 2단감쇠
         const r = Math.exp(-sigma / SR);
         const comb = Math.sin(n * Math.PI * x0); // 타현 위치 빗
+        const amp = comb * env * v * ampJit; // 빗×포락선×음량(현별)
         a1.push(2 * r * Math.cos(w));
         a2.push(-r * r);
-        init.push(comb * env * v); // 망치 임펄스 = 초기 모드 진폭(빗×포락선×음량)
+        init.push(amp);
+        if (si === 0 && n <= 6) firstPartials.push({ f: fn, a: amp });
+      }
+    }
+
+    // ── 저음 종진동/phantom partial: 횡진동 배음의 합주파수(fᵢ+fⱼ), 가진 제곱(∝vel²) ──
+    // 저음의 '금속성 울림'·어택의 정체 (Bank SMAC03). 중·고음(f0≥250)엔 안 붙임.
+    if (f0 < 250) {
+      const pg = 0.45;
+      for (let i = 0; i < firstPartials.length; i++) {
+        for (let j = i; j < Math.min(firstPartials.length, i + 3); j++) {
+          const fp = firstPartials[i].f + firstPartials[j].f;
+          if (fp >= nyq) continue;
+          const amp = pg * Math.abs(firstPartials[i].a) * Math.abs(firstPartials[j].a);
+          if (amp < 1e-4) continue;
+          const w = (2 * Math.PI * fp) / SR;
+          const sigma = (0.13 + 0.00212 * fp) * 0.8; // forced → 약간 더 길게
+          const r = Math.exp(-sigma / SR);
+          a1.push(2 * r * Math.cos(w));
+          a2.push(-r * r);
+          init.push(amp);
+        }
       }
     }
     const M = a1.length;
@@ -73,7 +115,8 @@ class Voice {
     this.y1 = Float64Array.from(init); // 초기 상태 주입 = 임펄스 가진
     this.y2 = new Float64Array(M);
 
-    // 레지스터 음량 보정(고음은 모드가 적어 작음) — 캘리브레이션으로 도4~도5 균형
+    // 레지스터 음량 보정(고음은 모드가 적어 작음) — 캘리브레이션으로 도4~도5 균형.
+    // (저음역은 UI 미노출. 건반 확장 시 레지스터별 레벨 재보정 필요.)
     this.norm = Math.pow(f0 / 261.63, 1.45);
 
     this.env = 0;

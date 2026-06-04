@@ -334,7 +334,8 @@ const whiteKeys = [
   function press(midi: number, keyEl: Element | null, label?: string) {
     litKey(keyEl);
     if (label) showNow('지금 소리: ' + label);
-    playMidi(midi, 0.8);
+    // 사람이 친 듯 매 타건 셈여림을 미세하게 달리(고정음색 = 가짜 신호)
+    playMidi(midi, 0.72 + Math.random() * 0.16);
   }
 
   // 큰 버튼: 도-미-솔-높은도 또르르 (해당 건반도 차례로 빛남)
