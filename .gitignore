@@ -18,3 +18,9 @@ pnpm-debug.log*
 .playwright-mcp/
 *.png
 !public/**/*.png
+# 오디오 원본/작업 파일은 저장소에 넣지 않음 (사용자 음원 보호 포함)
+*.wav
+*.aiff
+*.aif
+# 음색 분석용 임시 참조
+public/_ref/
