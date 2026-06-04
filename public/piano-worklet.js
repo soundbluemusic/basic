@@ -41,9 +41,9 @@ class Voice {
     const B = inharmonicity(f0);
     const nyq = 0.45 * SR;
     const x0 = 1 / 8; // 타현 위치(현 길이의 1/8) → 8배수 배음 억제
-    // 배음 롤오프(dB/100Hz): 사용자의 실제 피아노(따뜻·어두움, 고역 가파르게 감쇠)에 맞춤.
-    // 고역 배음을 빠르게 줄여 묵직한 음색. 속도가 셀수록 약간 완만(셈여림 밝기).
-    const rolloff = Math.min(3.0, Math.max(0.8, 1.7 + (0.6 - v) * 1.0));
+    // 배음 롤오프(dB/100Hz): 사용자 실제 피아노의 공정 스펙트럼(중역 기준)에 맞춤.
+    // 고역 brilliance가 생각보다 풍부해 과한 어둠을 거두고 중간값으로.
+    const rolloff = Math.min(2.5, Math.max(0.4, 1.0 + (0.6 - v) * 0.9));
     // 유니즌 3현 미세 디튠(≈±0.4cent) → 맥놀이 (정량 측정 미확정, 추정값)
     const detunes = [-0.00025, 0.00003, 0.00025];
 
@@ -176,14 +176,15 @@ class PianoProcessor extends AudioWorkletProcessor {
     this.MAX = 16;
     const init = options && options.processorOptions;
     this.testLinear = !!(init && init.testLinear);
-    this.voiceGain = init && init.voiceGain != null ? init.voiceGain : 0.0066;
+    this.voiceGain = init && init.voiceGain != null ? init.voiceGain : 0.0044;
     // 사운드보드 복사(radiation) 근사: 저음(기본음) 약화 + 중역(노래하는 0.5~3kHz) 강조
     // → 진짜 그랜드처럼 2~7배음이 살아 밝고 풍부해짐. 거친 초고역은 약화.
-    // 사용자 피아노(따뜻·어두움)에 맞춘 사운드보드: 저중역 따뜻함 + 고역 강한 약화.
+    // 사용자 피아노의 공정 스펙트럼에 맞춘 사운드보드: 저중역 따뜻함 + 고역 brilliance 복원.
     this.sb = [
-      makeHighPass(100, 0.7), // 초저역만 정리(저음 풍부함 유지)
+      makeHighPass(100, 0.7), // 초저역만 정리
       makeBiquadPeak(380, 0.7, 3), // 저중역 바디/따뜻함
-      makeHighShelf(2600, -9), // 어두운 음색: 고역 강하게 약화
+      makeBiquadPeak(850, 0.8, 4), // 760~960Hz 딥 보강
+      makeHighShelf(3500, 5), // 고역 공기감/brilliance 복원(실측 대비 부족분)
     ];
     if (init && init.midi != null) {
       this.voices.push(new Voice(init.midi, init.vel == null ? 0.8 : init.vel));
