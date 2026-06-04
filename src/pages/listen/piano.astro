@@ -198,17 +198,60 @@ const whiteKeys = [
 
   const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 
+  // 임펄스 응답 생성(절차적, 음원 파일 없음): 사용자 트랙의 공간감(리버브) 근사.
+  // 지수 감쇠 노이즈 + 고역 댐핑(어두운 꼬리) + 짧은 프리딜레이, 좌우 디코릴레이션.
+  function makeReverbIR(
+    c: AudioContext,
+    seconds: number,
+    decay: number,
+    damp: number,
+    preDelay: number
+  ) {
+    const rate = c.sampleRate;
+    const len = Math.floor(rate * seconds);
+    const pre = Math.floor(rate * preDelay);
+    const ir = c.createBuffer(2, pre + len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const env = Math.pow(1 - i / len, decay);
+        const n = (Math.random() * 2 - 1) * env;
+        lp += damp * (n - lp); // 1극 저역통과 → 고역 댐핑(어두운 잔향)
+        d[pre + i] = lp;
+      }
+    }
+    return ir;
+  }
+
   function ensureEngine(): Promise<void> {
     if (initPromise) return initPromise;
     initPromise = (async () => {
       ctx = new AC();
+      // ── 공간감(리버브) 버스: 소스 → dry + wet(컨볼루션) → 출력 ──
+      // 사용자 트랙의 잔향(측정 기반, 음악적으로 ~2.5초 방/홀)을 입혀 공간감을 맞춤.
+      const out = ctx.createGain();
+      out.connect(ctx.destination);
+      const busIn = ctx.createGain();
+      const dry = ctx.createGain();
+      dry.gain.value = 0.82;
+      const wet = ctx.createGain();
+      wet.gain.value = 0.22;
+      const conv = ctx.createConvolver();
+      conv.normalize = true;
+      conv.buffer = makeReverbIR(ctx, 2.5, 2.4, 0.38, 0.02);
+      busIn.connect(dry);
+      dry.connect(out);
+      busIn.connect(conv);
+      conv.connect(wet);
+      wet.connect(out);
       try {
         if (!ctx.audioWorklet) throw new Error('no audioWorklet');
         await ctx.audioWorklet.addModule('/piano-worklet.js');
         node = new AudioWorkletNode(ctx, 'piano-processor', {
           outputChannelCount: [2],
         });
-        node.connect(ctx.destination);
+        node.connect(busIn);
         mode = 'worklet';
       } catch {
         // 폴백: 컴프레서 하나 두고 가벼운 가산 합성
@@ -218,7 +261,7 @@ const whiteKeys = [
         const g = ctx.createGain();
         g.gain.value = 0.6;
         fbComp.connect(g);
-        g.connect(ctx.destination);
+        g.connect(busIn);
         mode = 'fallback';
       }
     })();
