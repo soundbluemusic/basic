@@ -115,9 +115,11 @@ class Voice {
     this.y1 = Float64Array.from(init); // 초기 상태 주입 = 임펄스 가진
     this.y2 = new Float64Array(M);
 
-    // 레지스터 음량 보정(고음은 모드가 적어 작음) — 캘리브레이션으로 도4~도5 균형.
-    // (저음역은 UI 미노출. 건반 확장 시 레지스터별 레벨 재보정 필요.)
-    this.norm = Math.pow(f0 / 261.63, 1.45);
+    // 레지스터 음량 보정(전 음역 88키 균형):
+    //  · 중·고음(f0≥~177Hz): (f0/261.63)^1.45 — 모드 적은 고음 보상(도4~도5 튜닝 보존)
+    //  · 저음(f0<~177Hz): 완만한 바닥 곡선 — 모드 많고 phantom 있는 저음이 깔리지 않게
+    const r0 = f0 / 261.63;
+    this.norm = Math.max(Math.pow(r0, 1.45), 0.62 * Math.pow(r0, 0.22));
 
     this.env = 0;
     this.peak = 1e-9;

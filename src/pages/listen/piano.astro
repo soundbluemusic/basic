@@ -1,19 +1,27 @@
 ---
 import Base from '../../layouts/Base.astro';
 
-// 흰 건반 한 옥타브 (도~높은도). 각 건반은 진짜 버튼이라 손가락·키보드·보조기기로 누를 수 있어요.
-// 어르신·초보 대상이라 반음(검은 건반)은 일부러 두지 않습니다.
-// midi: 물리 엔진이 현의 주파수를 계산하는 데 씁니다 (f = 440·2^((midi-69)/12)).
-const whiteKeys = [
-  { label: '도', midi: 60 }, // C4
-  { label: '레', midi: 62 }, // D4
-  { label: '미', midi: 64 }, // E4
-  { label: '파', midi: 65 }, // F4
-  { label: '솔', midi: 67 }, // G4
-  { label: '라', midi: 69 }, // A4
-  { label: '시', midi: 71 }, // B4
-  { label: '도', midi: 72 }, // C5
-];
+// 진짜 피아노 배열 88키 (A0~C8, MIDI 21~108). 흰 건반 52 + 검은 건반 36.
+// 각 건반은 진짜 버튼이라 손가락·키보드·보조기기로 누를 수 있어요.
+const KO = ['도', '도♯', '레', '레♯', '미', '파', '파♯', '솔', '솔♯', '라', '라♯', '시'];
+const isBlack = (pc: number) =>
+  pc === 1 || pc === 3 || pc === 6 || pc === 8 || pc === 10;
+
+type White = { midi: number; ko: string; oct: number; isC: boolean };
+type Black = { midi: number; ko: string; oct: number; x: number };
+const whites: White[] = [];
+const blacks: Black[] = [];
+let wc = 0; // 지금까지 흰 건반 수(검은 건반 위치 계산용)
+for (let midi = 21; midi <= 108; midi++) {
+  const pc = midi % 12;
+  const oct = Math.floor(midi / 12) - 1; // 과학적 음높이 표기(C4=가운데 도)
+  if (isBlack(pc)) {
+    blacks.push({ midi, ko: KO[pc], oct, x: wc });
+  } else {
+    whites.push({ midi, ko: KO[pc], oct, isC: pc === 0 });
+    wc++;
+  }
+}
 ---
 
 <Base title="피아노 소리 들어보기">
@@ -21,7 +29,7 @@ const whiteKeys = [
     <a class="back" href="/"><span aria-hidden="true">←</span> 처음으로</a>
 
     <h1>피아노 소리 들어보기</h1>
-    <p class="lead">버튼을 누르면 피아노 소리가 나요.</p>
+    <p class="lead">건반을 누르면 피아노 소리가 나요.</p>
     <p class="lead note">
       소리가 안 나면, 폰 옆 볼륨 버튼을 올리고 무음(매너) 모드를 꺼 주세요.
     </p>
@@ -30,29 +38,42 @@ const whiteKeys = [
       <span aria-hidden="true">▶</span> 소리 들어보기
     </button>
 
-    <!-- 방금 난 음을 큰 글씨로 보여줘요 (소리 ↔ 화면 연결) -->
     <p class="now" aria-live="polite"><span id="now">&nbsp;</span></p>
 
     <p class="hint">
-      건반을 하나씩 눌러도 소리가 나요. <span aria-hidden="true">↓</span>
+      진짜 피아노처럼 건반 88개예요. 좌우로 밀어서 쳐 보세요.
+      <span aria-hidden="true">↔</span>
     </p>
 
-    <div class="piano" role="group" aria-label="피아노 건반">
-      <div class="whites">
-        {
-          whiteKeys.map((k, i) => (
-            <button
-              class="key key--white"
-              type="button"
-              data-midi={k.midi}
-              data-label={k.label}
-              data-index={i}
-              aria-label={`${k.label} 건반`}
-            >
-              <span class="key__label">{k.label}</span>
-            </button>
-          ))
-        }
+    <div class="piano-scroll" id="pianoScroll">
+      <div class="keyboard" role="group" aria-label="피아노 건반 88개">
+        <div class="whites">
+          {
+            whites.map((w) => (
+              <button
+                class="key wkey"
+                type="button"
+                data-midi={w.midi}
+                aria-label={`${w.ko} ${w.oct}옥타브`}
+              >
+                <span class="wlabel">{w.isC ? `도${w.oct}` : w.ko}</span>
+              </button>
+            ))
+          }
+        </div>
+        <div class="blacks">
+          {
+            blacks.map((b) => (
+              <button
+                class="key bkey"
+                type="button"
+                data-midi={b.midi}
+                aria-label={`${b.ko} ${b.oct}옥타브`}
+                style={`left: calc(${b.x} * var(--wkw) - var(--bkw) / 2)`}
+              />
+            ))
+          }
+        </div>
       </div>
     </div>
   </main>
@@ -63,7 +84,6 @@ const whiteKeys = [
     display: inline-block;
     font-size: 1rem;
     font-weight: 700;
-    /* 떨리는 손도 쉽게 누르도록 탭 영역을 넓게 */
     padding: 12px 14px;
     margin-left: -14px;
     margin-bottom: 8px;
@@ -83,7 +103,6 @@ const whiteKeys = [
     margin-bottom: 22px;
   }
 
-  /* ── 큰 버튼: 두껍고 눌리는 느낌 ── */
   .big-button {
     width: 100%;
     padding: 30px;
@@ -105,7 +124,6 @@ const whiteKeys = [
     background: var(--accent-deep);
   }
 
-  /* ── 방금 난 음 표시 ── */
   .now {
     height: 1.6em;
     margin: 18px 0 6px;
@@ -136,57 +154,97 @@ const whiteKeys = [
     font-size: 1rem;
     color: var(--ink-soft);
     text-align: center;
-    margin: 0 0 14px;
+    margin: 0 0 12px;
   }
 
-  /* ── 피아노 (흰 건반만) ── */
-  .piano {
-    touch-action: manipulation; /* 두 번 탭 확대 방지 → 연주감 좋음 */
+  /* ── 88키 피아노 (가로 스크롤) ── */
+  .piano-scroll {
+    --wkw: 40px; /* 흰 건반 폭 */
+    --wkh: 165px; /* 흰 건반 높이 */
+    --bkw: 26px; /* 검은 건반 폭 */
+    --bkh: 104px; /* 검은 건반 높이 */
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    /* 화면 가장자리까지 꽉 차게(좌우 패딩 상쇄) */
+    margin: 0 calc(-1 * clamp(18px, 5vw, 28px));
+    padding: 4px clamp(18px, 5vw, 28px) 14px;
+    touch-action: pan-x; /* 가로 스크롤만, 두 번 탭 확대 방지 */
+  }
+  .keyboard {
+    position: relative;
+    height: var(--wkh);
+    width: calc(52 * var(--wkw));
     user-select: none;
   }
-
   .whites {
-    display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    display: flex;
+    height: 100%;
   }
-
-  .key {
-    border: 3px solid var(--line);
-    transition:
-      transform 0.05s ease,
-      background 0.05s ease;
-  }
-
-  .key--white {
-    height: 230px;
+  .wkey {
+    flex: 0 0 var(--wkw);
+    height: 100%;
     background: var(--paper);
-    border-radius: 0 0 12px 12px;
+    border: 1px solid #2a2a2a;
+    border-radius: 0 0 6px 6px;
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding-bottom: 18px;
-    box-shadow: 0 5px 0 rgba(22, 22, 22, 0.14);
+    padding-bottom: 8px;
+    box-shadow: inset 0 -4px 6px rgba(0, 0, 0, 0.06);
   }
-  .key__label {
-    font-size: 1.4rem;
-    font-weight: 800;
-    color: var(--ink);
+  .wlabel {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #8a8f96;
+    pointer-events: none;
   }
-  /* 눌리거나 연주될 때: 파랗게 빛나고 살짝 들어감 */
-  .key--white.is-on {
+  .wkey:active,
+  .wkey.is-on {
     background: var(--accent);
-    transform: translateY(4px);
-    box-shadow: 0 1px 0 rgba(22, 22, 22, 0.14);
   }
-  .key--white.is-on .key__label {
+  .wkey:active .wlabel,
+  .wkey.is-on .wlabel {
     color: var(--accent-ink);
+  }
+
+  .blacks {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .bkey {
+    position: absolute;
+    top: 0;
+    width: var(--bkw);
+    height: var(--bkh);
+    background: #181818;
+    border: 1px solid #000;
+    border-radius: 0 0 5px 5px;
+    pointer-events: auto;
+    box-shadow: 0 3px 4px rgba(0, 0, 0, 0.4);
+  }
+  .bkey:active,
+  .bkey.is-on {
+    background: var(--accent);
+  }
+
+  /* 키보드 포커스 또렷하게 */
+  .key:focus-visible {
+    outline: 4px solid var(--accent);
+    outline-offset: -4px;
+    z-index: 3;
   }
 </style>
 
 <script>
-  // 진짜 피아노 = 현의 물리. 음원 샘플 없이, 모달 물리 모델 엔진(AudioWorklet,
-  // /piano-worklet.js)이 현의 진동 모드를 샘플 단위로 계산해 소리를 만든다.
-  // 워크릿을 못 쓰는 (아주 구형) 브라우저에서는 가벼운 가산 합성으로 폴백한다.
+  // ── 진짜 피아노 = 현의 물리. 음원 샘플 없이 모달 물리 모델 엔진(AudioWorklet,
+  //    /piano-worklet.js)이 현의 진동 모드를 샘플 단위로 계산. + 공간감(리버브).
+  //    워크릿 미지원(아주 구형)에서는 가벼운 가산 합성으로 폴백. ──
   const AC = (window.AudioContext ||
     (window as any).webkitAudioContext) as typeof AudioContext;
 
@@ -197,9 +255,10 @@ const whiteKeys = [
   let initPromise: Promise<void> | null = null;
 
   const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+  const KO = ['도', '도♯', '레', '레♯', '미', '파', '파♯', '솔', '솔♯', '라', '라♯', '시'];
+  const koOf = (m: number) => KO[((m % 12) + 12) % 12];
 
   // 임펄스 응답 생성(절차적, 음원 파일 없음): 사용자 트랙의 공간감(리버브) 근사.
-  // 지수 감쇠 노이즈 + 고역 댐핑(어두운 꼬리) + 짧은 프리딜레이, 좌우 디코릴레이션.
   function makeReverbIR(
     c: AudioContext,
     seconds: number,
@@ -229,7 +288,6 @@ const whiteKeys = [
     initPromise = (async () => {
       ctx = new AC();
       // ── 공간감(리버브) 버스: 소스 → dry + wet(컨볼루션) → 출력 ──
-      // 사용자 트랙의 잔향(측정 기반, 음악적으로 ~2.5초 방/홀)을 입혀 공간감을 맞춤.
       const out = ctx.createGain();
       out.connect(ctx.destination);
       const busIn = ctx.createGain();
@@ -254,7 +312,6 @@ const whiteKeys = [
         node.connect(busIn);
         mode = 'worklet';
       } catch {
-        // 폴백: 컴프레서 하나 두고 가벼운 가산 합성
         fbComp = ctx.createDynamicsCompressor();
         fbComp.threshold.value = -18;
         fbComp.ratio.value = 4;
@@ -272,7 +329,7 @@ const whiteKeys = [
     if (ctx && ctx.state === 'suspended') ctx.resume();
   }
 
-  // ── 폴백(워크릿 미지원): 간단한 비조화 가산 음 ──
+  // 폴백(워크릿 미지원): 간단한 비조화 가산 음
   function fallbackNote(f0: number, vel: number, when: number) {
     const c = ctx as AudioContext;
     const bus = c.createGain();
@@ -303,7 +360,10 @@ const whiteKeys = [
     resume();
     if (mode === 'worklet' && node) {
       if (delay > 0) {
-        setTimeout(() => node!.port.postMessage({ type: 'noteOn', midi, vel }), delay * 1000);
+        setTimeout(
+          () => node!.port.postMessage({ type: 'noteOn', midi, vel }),
+          delay * 1000
+        );
       } else {
         node.port.postMessage({ type: 'noteOn', midi, vel });
       }
@@ -314,7 +374,11 @@ const whiteKeys = [
 
   // ── 화면 반응 ──
   const nowEl = document.getElementById('now');
-  function litKey(el: Element | null) {
+  const keyByMidi = new Map<number, HTMLButtonElement>();
+  document.querySelectorAll<HTMLButtonElement>('.key').forEach((k) => {
+    keyByMidi.set(Number(k.dataset.midi), k);
+  });
+  function litKey(el: Element | null | undefined) {
     if (!el) return;
     el.classList.add('is-on');
     setTimeout(() => el.classList.remove('is-on'), 260);
@@ -323,36 +387,27 @@ const whiteKeys = [
     if (!nowEl) return;
     nowEl.textContent = text;
     nowEl.classList.remove('pop');
-    void (nowEl as HTMLElement).offsetWidth; // 애니메이션 재시작
+    void (nowEl as HTMLElement).offsetWidth;
     nowEl.classList.add('pop');
   }
 
-  const whiteByIndex = [
-    ...document.querySelectorAll<HTMLButtonElement>('.key--white'),
-  ];
-
-  function press(midi: number, keyEl: Element | null, label?: string) {
+  function press(midi: number, keyEl: Element | null) {
     litKey(keyEl);
-    if (label) showNow('지금 소리: ' + label);
+    showNow('지금 소리: ' + koOf(midi));
     // 사람이 친 듯 매 타건 셈여림을 미세하게 달리(고정음색 = 가짜 신호)
     playMidi(midi, 0.72 + Math.random() * 0.16);
   }
 
   // 큰 버튼: 도-미-솔-높은도 또르르 (해당 건반도 차례로 빛남)
-  const melody = [
-    { midi: 60, idx: 0 },
-    { midi: 64, idx: 2 },
-    { midi: 67, idx: 4 },
-    { midi: 72, idx: 7 },
-  ];
-  const STEP = 0.5; // 음 간격(초) — 피아노 여운에 맞춰 넉넉히
-  let playing = false; // 연주 중 재클릭 시 중첩 방지
+  const melody = [60, 64, 67, 72];
+  const STEP = 0.5;
+  let playing = false;
   document.getElementById('play')?.addEventListener('click', () => {
     if (playing) return;
     playing = true;
     melody.forEach((m, i) => {
-      playMidi(m.midi, 0.85, i * STEP);
-      setTimeout(() => litKey(whiteByIndex[m.idx]), i * STEP * 1000);
+      playMidi(m, 0.85, i * STEP);
+      setTimeout(() => litKey(keyByMidi.get(m)), i * STEP * 1000);
     });
     setTimeout(() => showNow('지금 소리: 도미솔도'), melody.length * STEP * 1000);
     setTimeout(
@@ -367,7 +422,15 @@ const whiteKeys = [
   document.querySelectorAll<HTMLButtonElement>('.key').forEach((key) => {
     key.addEventListener('click', () => {
       const midi = Number(key.dataset.midi);
-      if (!Number.isNaN(midi)) press(midi, key, key.dataset.label);
+      if (!Number.isNaN(midi)) press(midi, key);
     });
   });
+
+  // 처음에 가운데 '도'(C4)가 보이도록 스크롤
+  const scroller = document.getElementById('pianoScroll');
+  const c4 = keyByMidi.get(60);
+  if (scroller && c4) {
+    scroller.scrollLeft =
+      c4.offsetLeft - scroller.clientWidth / 2 + c4.offsetWidth / 2;
+  }
 </script>
