@@ -178,10 +178,11 @@ for (let midi = 21; midi <= 108; midi++) {
 
   /* ── 88키 피아노 (가로 스크롤) ── */
   .piano-scroll {
-    --wkw: 40px; /* 흰 건반 폭 */
-    --wkh: 230px; /* 흰 건반 길이(실제 비율 6.4:1에 근접 — 폰 화면 절충) */
+    --wkw: 40px; /* 흰 건반 슬롯 폭(간격 포함) */
+    --gap: 1.72px; /* 흰 건반 사이 간격 = 폭×0.043 (실제 ≈1mm/23.5mm) */
+    --wkh: 255px; /* 흰 건반 길이 = 폭×6.38 (실제 150/23.5) */
     --bkw: 23.4px; /* 검은 건반 폭(0.585·흰폭, 실제 13.7/23.5) */
-    --bkh: 138px; /* 검은 건반 길이(0.60·흰길이, 실제 90/150) */
+    --bkh: 153px; /* 검은 건반 길이(0.60·흰길이, 실제 90/150) */
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -241,20 +242,17 @@ for (let midi = 21; midi <= 108; midi++) {
   .wkey {
     position: absolute;
     top: 0;
-    width: var(--wkw); /* 절대좌표 i×wkw 배치 → 균등 폭, 검은 건반과 정확 정렬 */
+    /* 슬롯(i×wkw)에 배치하고 폭은 (슬롯−간격) → 실제 ~1mm 간격(어두운 바닥이 보임) */
+    width: calc(var(--wkw) - var(--gap));
     height: 100%;
     box-sizing: border-box;
     background: linear-gradient(180deg, #fdfdfd 0%, #fbfbfb 82%, #ececec 100%);
-    border-right: 1px solid #c2c2c2;
     border-bottom: 4px solid #cdcdcd; /* 앞쪽 3D 턱 */
     border-radius: 0 0 5px 5px;
     display: flex;
     align-items: flex-end;
     justify-content: center;
     padding-bottom: 8px;
-  }
-  .wkey:first-child {
-    border-left: 1px solid #c2c2c2;
   }
   .wlabel {
     font-size: 0.72rem;
@@ -490,10 +488,12 @@ for (let midi = 21; midi <= 108; midi++) {
   let wkw = 40; // 흰 건반 폭(px)
   const MINW = 6, // 전체보기(88키 한 화면)까지 허용
     MAXW = 88;
-  const ASPECT = 5.8; // 흰 건반 길이:폭 (실제 6.4, 폰 화면 절충)
+  const ASPECT = 6.38; // 실제 흰 건반 길이:폭 (150/23.5)
+  const GAP = 0.043; // 실제 흰 건반 사이 간격:폭 (≈1mm/23.5mm)
   function applyWkw() {
-    const wkh = Math.min(300, Math.round(wkw * ASPECT)); // 폭에 비례(비율 유지), 과도하게 길면 캡
+    const wkh = Math.min(340, Math.round(wkw * ASPECT)); // 폭에 비례(비율 유지), 과도하면 캡
     scroller.style.setProperty('--wkw', wkw + 'px');
+    scroller.style.setProperty('--gap', (wkw * GAP).toFixed(2) + 'px'); // 실제 간격 비율
     scroller.style.setProperty('--bkw', (wkw * 0.585).toFixed(2) + 'px'); // 실제 흑/백 폭비 13.7/23.5
     scroller.style.setProperty('--wkh', wkh + 'px');
     scroller.style.setProperty('--bkh', Math.round(wkh * 0.6) + 'px'); // 실제 흑/백 길이비 90/150
